@@ -1,0 +1,25 @@
+{
+  "name": "wa-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-grade WhatsApp CRM SaaS",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w @wa-crm/backend\" \"npm run dev -w @wa-crm/frontend\"",
+    "dev:backend": "npm run dev -w @wa-crm/backend",
+    "dev:frontend": "npm run dev -w @wa-crm/frontend",
+    "build": "npm run build -w @wa-crm/backend && npm run build -w @wa-crm/frontend",
+    "db:migrate": "npm run db:migrate -w @wa-crm/backend",
+    "db:push": "npm run db:push -w @wa-crm/backend",
+    "db:seed": "npm run db:seed -w @wa-crm/backend",
+    "test": "npm run test -w @wa-crm/backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
