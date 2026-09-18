@@ -1,0 +1,575 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Tenancy
+// ============================================================
+
+model Organization {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String      @unique
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  workspaces  Workspace[]
+}
+
+model Workspace {
+  id                 String              @id @default(uuid()) @db.Uuid
+  organizationId     String              @db.Uuid
+  name               String
+  slug               String              @unique
+  companyName        String              @default("")
+  logoUrl            String?
+  timezone           String              @default("Asia/Kolkata")
+  currency           String              @default("INR")
+  aiProvider         String              @default("mock")
+  aiModel            String?
+  billingTier        String              @default("free")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members            WorkspaceMember[]
+  whatsappAccounts   WhatsappAccount[]
+  whatsappNumbers    WhatsappNumber[]
+  contacts           Contact[]
+  conversations      Conversation[]
+  messages           Message[]
+  leads              Lead[]
+  deals              Deal[]
+  tasks              Task[]
+  notes              Note[]
+  activities         Activity[]
+  templates          MessageTemplate[]
+  automations        Automation[]
+  notifications      Notification[]
+  webhookEvents      WebhookEvent[]
+  auditLogs          AuditLog[]
+  settings           WorkspaceSetting?
+
+  @@index([organizationId])
+  @@index([slug])
+}
+
+model WorkspaceSetting {
+  id                String      @id @default(uuid()) @db.Uuid
+  workspaceId       String      @unique @db.Uuid
+  workspace         Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  replySignature    String      @default("")
+  autoReplyEnabled  Boolean     @default(false)
+  autoReplyTemplate String      @default("")
+  leadScoringRules  Json?
+  updatedAt         DateTime    @updatedAt
+}
+
+// ============================================================
+// Users & Roles
+// ============================================================
+
+model User {
+  id                 String              @id @default(uuid()) @db.Uuid
+  email              String              @unique
+  passwordHash       String
+  name               String
+  avatarUrl          String?
+  emailVerifiedAt    DateTime?
+  lastLoginAt        DateTime?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  memberships        WorkspaceMember[]
+  conversations      Conversation[]      @relation("AssignedUser")
+  leads              Lead[]              @relation("LeadOwner")
+  deals              Deal[]              @relation("DealOwner")
+  tasks              Task[]              @relation("TaskAssignee")
+  messages           Message[]           @relation("MessageSender")
+  activities         Activity[]          @relation("ActivityActor")
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  assignedContacts   Contact[]        @relation("ContactAssignee")
+  resetTokens        PasswordResetToken[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  role        RoleType @default(AGENT)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String     @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum RoleType {
+  OWNER
+  ADMIN
+  MANAGER
+  AGENT
+}
+
+// ============================================================
+// WhatsApp
+// ============================================================
+
+model WhatsappAccount {
+  id                   String              @id @default(uuid()) @db.Uuid
+  workspaceId          String              @db.Uuid
+  businessAccountId    String
+  accessToken          String?
+  phoneNumberId        String?
+  webhookVerifyToken   String
+  webhookConfigured    Boolean             @default(false)
+  status               String              @default("disconnected") // connected | disconnected | error
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  numbers              WhatsappNumber[]
+
+  @@index([workspaceId])
+}
+
+model WhatsappNumber {
+  id                String          @id @default(uuid()) @db.Uuid
+  workspaceId       String          @db.Uuid
+  accountId         String?         @db.Uuid
+  phoneNumber       String          @unique
+  displayName       String?
+  status            String          @default("active")
+  isPrimary         Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account           WhatsappAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  conversations     Conversation[]
+
+  @@index([workspaceId])
+  @@index([phoneNumber])
+}
+
+// ============================================================
+// Contacts
+// ============================================================
+
+model Contact {
+  id            String            @id @default(uuid()) @db.Uuid
+  workspaceId   String            @db.Uuid
+  name          String
+  phone         String            @unique
+  email         String?
+  company       String?
+  location      String?
+  avatarUrl     String?
+  leadStatus    String            @default("New")
+  leadScore     Int               @default(0)
+  customerType  String            @default("Lead") // Lead | Customer | Vendor
+  source        String            @default("WhatsApp")
+  assignedToId  String?           @db.Uuid
+  lastActivityAt DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedTo    User?             @relation("ContactAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  tags          ContactTag[]
+  conversations Conversation[]
+  leads         Lead[]
+  deals         Deal[]
+  tasks         Task[]
+  notes         Note[]
+  activities    Activity[]
+  orders        Order[]
+
+  @@index([workspaceId])
+  @@index([assignedToId])
+  @@index([leadStatus])
+  @@index([phone])
+  @@index([lastActivityAt])
+}
+
+model Tag {
+  id         String       @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  name       String
+  color      String       @default("#22c55e")
+  createdAt  DateTime     @default(now())
+  contacts   ContactTag[]
+  leads      Lead[]
+  deals      Deal[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+model ContactTag {
+  id        String  @id @default(uuid()) @db.Uuid
+  contactId String  @db.Uuid
+  tagId     String  @db.Uuid
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@index([contactId])
+  @@index([tagId])
+}
+
+// ============================================================
+// Conversations & Messages
+// ============================================================
+
+model Conversation {
+  id               String                    @id @default(uuid()) @db.Uuid
+  workspaceId      String                    @db.Uuid
+  contactId        String                    @db.Uuid
+  numberId         String?                   @db.Uuid
+  channel          String                    @default("whatsapp") // whatsapp | instagram | email | ...
+  externalThreadId String?
+  status           String                    @default("open") // open | closed | archived
+  priority         String                    @default("normal") // low | normal | high | urgent
+  isStarred        Boolean                   @default(false)
+  assignedToId     String?                   @db.Uuid
+  unreadCount      Int                       @default(0)
+  lastMessageAt    DateTime?
+  lastMessageText  String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact          Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  number           WhatsappNumber?           @relation(fields: [numberId], references: [id], onDelete: SetNull)
+  assignedTo       User?                     @relation("AssignedUser", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages         Message[]
+  activities       Activity[]
+  tasks            Task[]
+  notes            Note[]
+
+  @@index([workspaceId, status])
+  @@index([contactId])
+  @@index([assignedToId])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id                 String              @id @default(uuid()) @db.Uuid
+  workspaceId        String              @db.Uuid
+  conversationId     String              @db.Uuid
+  senderType         String              @default("customer") // customer | agent | system
+  senderId           String?             @db.Uuid
+  externalMessageId  String?             @unique
+  messageType        String              @default("text") // text | image | video | audio | document | location | contact | template | system | internal_note
+  body               String?
+  mediaUrl           String?
+  mimeType           String?
+  status             String              @default("sent") // sending | sent | delivered | read | failed
+  metadata           Json?
+  createdAt          DateTime            @default(now())
+  sentAt             DateTime?
+  deliveredAt        DateTime?
+  readAt             DateTime?
+  conversation       Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sender             User?               @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  attachments        MessageAttachment[]
+
+  @@index([workspaceId])
+  @@index([conversationId, createdAt])
+  @@index([externalMessageId])
+  @@index([status])
+}
+
+model MessageAttachment {
+  id          String  @id @default(uuid()) @db.Uuid
+  messageId   String  @db.Uuid
+  type        String
+  url         String
+  mimeType    String?
+  fileName    String?
+  sizeBytes   Int?
+  message     Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+// ============================================================
+// Leads
+// ============================================================
+
+model Lead {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @db.Uuid
+  contactId          String    @db.Uuid
+  name               String
+  phone              String
+  source             String    @default("WhatsApp")
+  status             String    @default("New") // New | Contacted | Qualified | Unqualified | Converted | Lost
+  score              Int       @default(0)
+  assignedToId       String?   @db.Uuid
+  estimatedValue     Decimal?  @db.Decimal(12, 2)
+  expectedCloseDate  DateTime?
+  notes              String?
+  tags               Tag[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact            Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedTo         User?     @relation("LeadOwner", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status])
+  @@index([contactId])
+  @@index([assignedToId])
+  @@index([score])
+}
+
+// ============================================================
+// Deals
+// ============================================================
+
+model Deal {
+  id                String     @id @default(uuid()) @db.Uuid
+  workspaceId       String     @db.Uuid
+  contactId         String?    @db.Uuid
+  name              String
+  value             Decimal    @default(0) @db.Decimal(12, 2)
+  stage             String     @default("New Lead") // pipeline stages
+  probability       Int        @default(0)
+  expectedCloseDate DateTime?
+  assignedToId      String?    @db.Uuid
+  notes             String?
+  wonAt             DateTime?
+  lostAt            DateTime?
+  lostReason        String?
+  tags              Tag[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  workspace         Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact           Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignedTo        User?      @relation("DealOwner", fields: [assignedToId], references: [id], onDelete: SetNull)
+  tasks             Task[]
+  activities        Activity[]
+
+  @@index([workspaceId, stage])
+  @@index([contactId])
+  @@index([assignedToId])
+}
+
+// ============================================================
+// Orders (purchases)
+// ============================================================
+
+model Order {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  contactId   String    @db.Uuid
+  orderNumber String
+  amount      Decimal   @db.Decimal(12, 2)
+  status      String    @default("completed")
+  items       Json?
+  placedAt    DateTime  @default(now())
+  contact     Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([workspaceId])
+}
+
+// ============================================================
+// Tasks / Notes / Activities
+// ============================================================
+
+model Task {
+  id             String      @id @default(uuid()) @db.Uuid
+  workspaceId    String      @db.Uuid
+  contactId      String?     @db.Uuid
+  dealId         String?     @db.Uuid
+  conversationId String?     @db.Uuid
+  title          String
+  description    String?
+  type           String      @default("follow_up") // follow_up | call | meeting | note | other
+  priority       String      @default("medium") // low | medium | high | urgent
+  status         String      @default("pending") // pending | completed | cancelled
+  dueDate        DateTime?
+  recurring      String?     // daily | weekly | monthly | null
+  assignedToId   String?     @db.Uuid
+  completedAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact        Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal           Deal?       @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  assignedTo     User?       @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status])
+  @@index([assignedToId])
+  @@index([dueDate])
+  @@index([contactId])
+}
+
+model Note {
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @db.Uuid
+  contactId      String?      @db.Uuid
+  conversationId String?      @db.Uuid
+  authorId       String?      @db.Uuid
+  body           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([contactId])
+  @@index([conversationId])
+}
+
+model Activity {
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @db.Uuid
+  type           String // conversation_started | message_received | message_sent | lead_created | agent_assigned | quotation_sent | deal_created | follow_up_scheduled | deal_won | deal_lost | note_created | task_completed
+  title          String
+  description    String?
+  actorId        String?      @db.Uuid
+  contactId      String?      @db.Uuid
+  conversationId String?      @db.Uuid
+  dealId         String?      @db.Uuid
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor          User?        @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  deal           Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([contactId])
+  @@index([conversationId])
+  @@index([dealId])
+}
+
+// ============================================================
+// Templates & Automation
+// ============================================================
+
+model MessageTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String
+  category    String   @default("MARKETING") // UTILITY | MARKETING | AUTHENTICATION
+  language    String   @default("en")
+  body        String
+  variables   Json?
+  status      String   @default("approved") // draft | pending | approved | rejected
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Automation {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  description String?
+  triggerType String // new_conversation | new_message | contact_created | lead_created | lead_status_changed | deal_created | deal_stage_changed | no_response | task_overdue
+  conditions  Json?
+  actions     Json?
+  isEnabled   Boolean   @default(true)
+  runCount    Int       @default(0)
+  lastRunAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs        AutomationRun[]
+
+  @@index([workspaceId, triggerType])
+}
+
+model AutomationRun {
+  id           String     @id @default(uuid()) @db.Uuid
+  automationId String     @db.Uuid
+  workspaceId  String     @db.Uuid
+  status       String     @default("success") // success | error | skipped
+  error        String?
+  context      Json?
+  createdAt    DateTime   @default(now())
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@index([automationId])
+  @@index([workspaceId])
+}
+
+// ============================================================
+// Notifications, Webhooks, Audit
+// ============================================================
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  type        String // new_conversation | new_message | mention | follow_up_due | task_overdue | deal_won | automation_error | assignment
+  title       String
+  body        String?
+  link        String?
+  data        Json?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, readAt])
+  @@index([userId])
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String?  @db.Uuid
+  source      String   @default("whatsapp")
+  eventType   String
+  payload     Json?
+  status      String   @default("received") // received | processed | failed
+  idempotencyKey String? @unique
+  error       String?
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([status])
+}
+
+model AuditLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String?   @db.Uuid
+  userId      String?   @db.Uuid
+  action      String
+  entityType  String?
+  entityId    String?
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId])
+}
