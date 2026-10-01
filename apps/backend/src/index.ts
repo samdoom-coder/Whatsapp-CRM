@@ -13,14 +13,28 @@ async function main() {
 
   initSocket(server);
 
-  // Verify database connectivity
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    logger.info('Database connected');
-  } catch (err) {
-    logger.error({ err }, 'Database connection failed — is PostgreSQL running?');
-    process.exit(1);
+  // Verify database connectivity (retry — postgres can take ~30s on first boot)
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let connected = false;
+  for (let attempt = 1; attempt <= 15; attempt++) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      logger.info('Database connected');
+      connected = true;
+      break;
+    } catch (err) {
+      logger.error(
+        { attempt },
+        `Database connection failed (attempt ${attempt}/15) — retrying in 2s...`,
+      );
+      if (attempt === 15) {
+        logger.error({ err }, 'Database connection failed — is PostgreSQL running?');
+        process.exit(1);
+      }
+      await sleep(2000);
+    }
   }
+  if (!connected) process.exit(1);
 
   // Start background worker
   startWorker().catch((err) => logger.error('Worker failed to start', err));

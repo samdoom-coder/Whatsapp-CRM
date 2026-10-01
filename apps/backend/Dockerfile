@@ -29,16 +29,13 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY --from=build /app/apps/backend/prisma ./apps/backend/prisma
 COPY apps/backend/package.json apps/backend/package.json
+COPY apps/backend/docker-entrypoint.sh apps/backend/docker-entrypoint.sh
+RUN chmod +x apps/backend/docker-entrypoint.sh
 WORKDIR /app/apps/backend
 EXPOSE 4000
 
 # DB_AUTO_PUSH=true creates the schema on boot (used by docker-compose).
 # DB_SEED_ON_START=true reseeds demo data (off by default; use `docker compose exec` instead).
-CMD ["sh", "-c", "\
-  if [ \"$DB_AUTO_PUSH\" = \"true\" ]; then \
-    npx prisma db push --accept-data-loss --schema prisma/schema.prisma; \
-  fi && \
-  if [ \"$DB_SEED_ON_START\" = \"true\" ]; then \
-    npx tsx prisma/seed.ts; \
-  fi && \
-  node dist/index.js"]
+# Entrypoint retries `prisma db push` 30x and auto-falls back to
+# host.docker.internal when bridge postgres:5432 is blocked.
+CMD ["./docker-entrypoint.sh"]
