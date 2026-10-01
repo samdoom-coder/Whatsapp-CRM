@@ -1,0 +1,20 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --workspaces --include-workspace-root --no-audit --no-fund
+      - run: npx prisma generate --schema apps/backend/prisma/schema.prisma
+      - run: npm run build -w @wa-crm/backend
+      - run: npm run build -w @wa-crm/frontend
+      - run: DATABASE_URL=postgresql://crm:crm_dev_password@localhost:5432/whatsapp_crm?schema=public npx prisma validate --schema apps/backend/prisma/schema.prisma
