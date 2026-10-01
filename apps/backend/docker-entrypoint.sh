@@ -1,5 +1,5 @@
 #!/bin/sh
-# Backend entrypoint: wait for Postgres/Redis, push schema, then start API.
+# Backend entrypoint: wait for Postgres/Redis, apply migrations, then start API.
 # Fixes two local docker failure modes:
 #  1. Old CMD used `... && node` so any prisma/seed failure prevented node from starting.
 #  2. Bridge networking can resolve `postgres` but refuse TCP (P1001).
@@ -38,19 +38,34 @@ if ! try_host "$DB_HOST" 5432; then
   fi
 fi
 
-if [ "${DB_AUTO_PUSH:-true}" = "true" ]; then
-  echo "[entrypoint] pushing prisma schema (30 retries)..."
+if [ "${DB_MIGRATE_DEPLOY:-true}" = "true" ]; then
+  echo "[entrypoint] applying prisma migrations (30 retries)..."
   for i in $(seq 1 30); do
-    if npx prisma db push --accept-data-loss --schema prisma/schema.prisma; then
-      echo "[entrypoint] schema ready"
+    if npx prisma migrate deploy --schema prisma/schema.prisma; then
+      echo "[entrypoint] migrations applied"
+      MIGRATED=true
       break
     fi
-    echo "[entrypoint] db push failed attempt $i/30, retry in 2s..."
+    echo "[entrypoint] migrate deploy failed attempt $i/30, retry in 2s..."
     sleep 2
     if [ "$i" -eq 30 ]; then
-      echo "[entrypoint] DB never became ready — starting API anyway so logs are visible"
+      echo "[entrypoint] migrate deploy never succeeded"
+      MIGRATED=false
     fi
   done
+fi
+
+# One-time fallback for volumes created by the old `db push` flow (no
+# _prisma_migrations table): sync schema then mark baseline as applied.
+# Keep DB_AUTO_PUSH=true until all environments are migrated, then set false.
+if [ "${MIGRATED:-true}" != "true" ] && [ "${DB_AUTO_PUSH:-true}" = "true" ]; then
+  echo "[entrypoint] falling back to prisma db push (legacy volumes)..."
+  if npx prisma db push --schema prisma/schema.prisma; then
+    echo "[entrypoint] schema pushed, marking baseline migration as applied..."
+    npx prisma migrate resolve --applied "20260818214014_init" --schema prisma/schema.prisma || true
+  else
+    echo "[entrypoint] db push also failed — starting API anyway so logs are visible"
+  fi
 fi
 
 if [ "${DB_SEED_ON_START:-false}" = "true" ]; then
