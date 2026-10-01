@@ -27,3 +27,28 @@ export const config = {
 };
 
 export const isProd = config.env === 'production';
+
+// Fail fast on unsafe production config — local demo stays permissive.
+if (isProd) {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required in production');
+  }
+  if (config.authSecret.length < 32) {
+    throw new Error('AUTH_SECRET must be ≥32 chars in production');
+  }
+  if (config.authSecret.includes('change-me') || config.authSecret.includes('dev-secret')) {
+    console.warn('[config] WARNING: AUTH_SECRET is still the default placeholder — set a random value');
+  }
+  if (config.demoMode) {
+    console.warn('[config] WARNING: DEMO_MODE is on in production — demo traffic + mock AI active');
+  }
+  if (config.ai.provider !== 'mock' && !config.ai.apiKey) {
+    throw new Error(`AI_API_KEY is required when AI_PROVIDER=${config.ai.provider}`);
+  }
+  const hasWhatsapp = Boolean(
+    config.whatsapp.accessToken && config.whatsapp.phoneNumberId && config.whatsapp.businessAccountId,
+  );
+  if (!hasWhatsapp && !config.demoMode) {
+    console.warn('[config] WARNING: no WhatsApp Cloud API credentials and DEMO_MODE=false — inbound disabled');
+  }
+}
