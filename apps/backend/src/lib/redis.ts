@@ -17,6 +17,17 @@ redis.on('error', (err) => {
 
 if (process.env.NODE_ENV !== 'production') globalForRedis.redis = redis;
 
+export function createBullMQConnection(): Redis {
+  const conn = new Redis(config.redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+  conn.on('error', (err) => {
+    if (process.env.NODE_ENV !== 'test') console.error('[bullmq-redis]', err.message);
+  });
+  return conn;
+}
+
 export async function redisPing() {
   try {
     await redis.ping();
