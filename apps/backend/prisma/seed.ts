@@ -1,6 +1,44 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import net from 'net';
 
+function getDbHost(url: string | undefined): string {
+  if (!url) return '';
+  const m = url.match(/@([^:/?]+)/);
+  return m ? m[1] : '';
+}
+
+function tryTcp(host: string, port: number, timeoutMs = 2000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = net.connect({ host, port });
+    const done = (ok: boolean) => {
+      s.destroy();
+      resolve(ok);
+    };
+    s.on('connect', () => done(true));
+    s.on('error', () => done(false));
+    s.on('timeout', () => done(false));
+    s.setTimeout(timeoutMs);
+  });
+}
+
+// `docker exec` seed uses compose env (postgres) while entrypoint may have
+// fallen back to host.docker.internal at runtime — mirror that fallback here.
+async function resolveDatabaseUrl(): Promise<string> {
+  let url = process.env.DATABASE_URL ?? '';
+  const host = getDbHost(url);
+  if (host && host !== 'host.docker.internal' && host !== 'localhost' && host !== '127.0.0.1') {
+    const direct = await tryTcp(host, 5432);
+    if (!direct && (await tryTcp('host.docker.internal', 5432))) {
+      console.log(`[seed] cannot reach ${host}:5432, falling back to host.docker.internal:5432`);
+      url = url.replace(`@${host}:`, '@host.docker.internal:').replace(`@${host}/`, '@host.docker.internal/');
+      process.env.DATABASE_URL = url;
+    }
+  }
+  return url;
+}
+
+await resolveDatabaseUrl();
 const prisma = new PrismaClient();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
