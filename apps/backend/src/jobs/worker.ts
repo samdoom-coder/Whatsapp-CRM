@@ -1,13 +1,15 @@
 import { Queue, Worker, QueueEvents } from 'bullmq';
-import { redis } from '../lib/redis.js';
+import { createBullMQConnection } from '../lib/redis.js';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { notifyUser } from '../modules/notifications/notification.routes.js';
 
+// BullMQ blocks connections (BRPOP) — each Queue/Worker needs its own
+// connection. Sharing one ioredis instance stalls jobs and crashes workers.
 export const queues = {
-  followups: new Queue('followups', { connection: redis }),
-  notifications: new Queue('notifications', { connection: redis }),
-  automations: new Queue('automations', { connection: redis }),
+  followups: new Queue('followups', { connection: createBullMQConnection() }),
+  notifications: new Queue('notifications', { connection: createBullMQConnection() }),
+  automations: new Queue('automations', { connection: createBullMQConnection() }),
 };
 
 export async function enqueueFollowupReminder(params: { taskId: string; workspaceId: string; dueAt: Date }) {
@@ -84,7 +86,7 @@ export async function startWorker() {
       }
       return { ok: true };
     },
-    { connection: redis },
+    { connection: createBullMQConnection() },
   );
 
   const notificationWorker = new Worker(
@@ -94,7 +96,7 @@ export async function startWorker() {
       await notifyUser(params);
       return { ok: true };
     },
-    { connection: redis },
+    { connection: createBullMQConnection() },
   );
 
   followupWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err: err.message }, 'followup job failed'));
