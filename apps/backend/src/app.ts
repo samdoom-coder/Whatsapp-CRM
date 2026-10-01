@@ -55,6 +55,8 @@ export function createApp() {
     limit: 300,
     standardHeaders: true,
     legacyHeaders: false,
+    // Don't 500 all /api traffic when Redis hiccups — let requests through.
+    passOnStoreError: true,
     store: new RateLimiterRedis({
       sendCommand: (...args: string[]) =>
         redis.call.apply(redis, args as unknown as [string, ...(string | Buffer | number)[]]) as Promise<any>,
