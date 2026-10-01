@@ -67,6 +67,8 @@ services:
     build:
       context: .
       dockerfile: apps/frontend/Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
     ports:
